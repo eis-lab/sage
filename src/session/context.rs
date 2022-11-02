@@ -4,10 +4,10 @@ use crate::session::device::{Buffer, Device, KernelProgram};
 use crate::session::memory;
 use crate::session::memory::{Allocator, MemoryError};
 use crate::shape::SizedExtent;
-use crate::tensor::data::DeviceData;
+use crate::tensor::data::{DataType, OpenClData};
 use crate::tensor::{Data, Tensor};
 use crate::var::Var;
-use crate::{session, DataType};
+use crate::{session};
 use itertools::Itertools;
 use std::borrow::Borrow;
 use std::cell::RefCell;
@@ -16,8 +16,9 @@ use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use crate::session::reactor::Reactor;
 
 extern crate ocl;
 
@@ -30,11 +31,13 @@ pub struct Context {
     kernel_idx_by_src: HashMap<String, usize>,
     // memory cap
     pub memory: Allocator,
+
+    pub reactor: Arc<Mutex<Box<Reactor>>>,
 }
 
 impl Context {
     pub fn new() -> Self {
-        Self::with_device(0)
+        Self::with_device(Device::get_first_gpu())
     }
 
     pub fn with_device(idx: usize) -> Self {
@@ -44,6 +47,7 @@ impl Context {
             kernels: Vec::new(),
             kernel_idx_by_src: HashMap::new(),
             memory: Allocator::new(1000 * 1024 * 1024 / 4, false, true),
+            reactor: Reactor::new(),
         }
     }
 
@@ -56,8 +60,8 @@ impl Context {
     }
 
     pub fn get_program_with_id<S>(&mut self, src: S) -> (usize, &KernelProgram)
-    where
-        S: AsRef<str>,
+        where
+            S: AsRef<str>,
     {
         if !self.kernel_idx_by_src.contains_key(src.as_ref()) {
             //println!("{}", src.as_ref());
@@ -79,8 +83,8 @@ impl Context {
     }
 
     pub fn get_program<S>(&mut self, src: S) -> &KernelProgram
-    where
-        S: AsRef<str>,
+        where
+            S: AsRef<str>,
     {
         self.get_program_with_id(src).1
     }
@@ -90,8 +94,8 @@ impl Context {
     }
 
     pub fn eval<'a, I>(&mut self, targets: I)
-    where
-        I: IntoIterator<Item = &'a Var>,
+        where
+            I: IntoIterator<Item=&'a Var>,
     {
         // get (already evaluated) inputs
         let y: Vec<&Var> = targets.into_iter().collect_vec();
@@ -112,7 +116,7 @@ impl Context {
         p.exec(self);
     }
 
-    pub fn alloc(&mut self, data_type: DataType, size: usize) -> Result<DeviceData, Error> {
+    pub fn alloc(&mut self, data_type: DataType, size: usize) -> Result<OpenClData, Error> {
         // let v1 = self.m_t.values().map(|t| t.size()).sum::<usize>() * 4 / (1024 * 1024);
         //println!("alloc {} MB", self.memory.mem_used() * 4 / (1024 * 1024));
 
@@ -120,7 +124,7 @@ impl Context {
         let m = self
             .memory
             .alloc(size, &self.device)
-            .map(|memory| DeviceData { memory, data_type });
+            .map(|memory| OpenClData { memory, data_type });
         //let after = self.memory.mem_used();
 
         // println!(
@@ -152,8 +156,8 @@ impl CachedAccess {
     }
 
     pub fn load_program<'a, F>(&self, ctx: &'a mut Context, gen_src: F) -> &'a KernelProgram
-    where
-        F: FnOnce() -> String,
+        where
+            F: FnOnce() -> String,
     {
         let mut last_call = self.last_call.borrow_mut();
         let ctx_ptr = ctx as *const Context;

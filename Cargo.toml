@@ -2,16 +2,24 @@
 name = "sage"
 version = "0.0.1"
 edition = "2021"
-license = "MIT"
+license = "MIT OR Apache-2.0"
+authors = ["In Gim <in.gim@yale.edu>"]
 keywords = ["deep learning", "machine learning", "differentiable programming", "scientific computing"]
 categories = ["science", "mathematics"]
-include = ["/src", "LICENSE", "README.md"]
+description = "Experimental deep learning framework"
+homepage = "https://sage.rs/"
+repository = "https://github.com/ingim/sage"
+include = ["/src", "LICENSE-MIT", "LICENSE-APACHE", "README.md"]
 
 [lib]
 name = "sage"
 crate-type = ["lib", "cdylib"]
 
+[features]
+cuda = ["rustacuda", "rustacuda_core", "rustacuda_derive"]
+
 [dependencies]
+futures = "0.3"
 num-traits = "0.2"
 thiserror = "1.0"
 itertools = "0.10.2"
@@ -25,6 +33,9 @@ rayon = "1.5.2"
 by_address = "1.0.4"
 jni = "0.5.2"
 ureq = { version = "2.4.0", default-features = false, features = ["json", "charset"] }
+rustacuda = { version = "0.1", optional = true }
+rustacuda_core = { version = "0.1", optional = true }
+rustacuda_derive = { version = "0.1", optional = true }
 
 #
 #

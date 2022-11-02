@@ -1,11 +1,11 @@
 // all opencl-related things go here
 
-use crate::tensor::Data;
-use crate::{Context, Tensor};
-use itertools::Itertools;
+use crate::tensor::{Data, Tensor};
+use itertools::{enumerate, Itertools};
 use ocl::traits::WorkDims;
 use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
+use crate::session::context::Context;
 
 #[derive(Debug)]
 pub struct DeviceError(ocl::Error);
@@ -31,6 +31,15 @@ impl Device {
             .into_iter()
             .map(|d| d.name().unwrap())
             .collect_vec()
+    }
+
+    pub fn get_first_gpu() -> usize {
+        for (i, d) in enumerate(Self::get_list()) {
+            if d.to_lowercase().contains("nvidia") || d.to_lowercase().contains("radeon") {
+                return i;
+            }
+        }
+        0
     }
 
     pub fn new(idx: usize) -> Self {
@@ -69,7 +78,7 @@ impl Device {
                 size,
                 None,
             )
-            .map_err(|e| DeviceError::from_core(e))?
+                .map_err(|e| DeviceError::from_core(e))?
         };
         Ok(Buffer {
             cl_mem,
@@ -100,8 +109,8 @@ impl Buffer {
     }
 
     pub fn read<T>(&self) -> Vec<T>
-    where
-        T: ocl::OclPrm,
+        where
+            T: ocl::OclPrm,
     {
         let mut vec = vec![T::default(); self.size]; // TODO size check 16bit vs 32bit
         unsafe {
@@ -114,14 +123,14 @@ impl Buffer {
                 None::<ocl::core::Event>,
                 None::<&mut ocl::core::Event>,
             )
-            .unwrap();
+                .unwrap();
         }
         vec
     }
 
     pub fn write<T>(&self, data: &[T])
-    where
-        T: ocl::OclPrm,
+        where
+            T: ocl::OclPrm,
     {
         unsafe {
             ocl::core::enqueue_write_buffer(
@@ -133,13 +142,13 @@ impl Buffer {
                 None::<ocl::core::Event>,
                 None::<&mut ocl::core::Event>,
             )
-            .unwrap();
+                .unwrap();
         }
     }
 
     pub fn fill<T>(&self, pattern: T)
-    where
-        T: ocl::OclPrm,
+        where
+            T: ocl::OclPrm,
     {
         ocl::core::enqueue_fill_buffer(
             &self.queue,
@@ -151,12 +160,12 @@ impl Buffer {
             None::<&mut ocl::core::Event>,
             Some(&self.queue.device_version()),
         )
-        .unwrap();
+            .unwrap();
     }
 
     pub fn sub_buffer<T>(&self, size: usize, offset: usize) -> Buffer
-    where
-        T: ocl::OclPrm,
+        where
+            T: ocl::OclPrm,
     {
         if self.is_sub_buffer() {
             panic!("cant create region of a region");
@@ -167,7 +176,7 @@ impl Buffer {
             ocl::flags::MemFlags::new(),
             &ocl::core::BufferRegion::new(offset, size),
         )
-        .unwrap();
+            .unwrap();
         Buffer {
             cl_mem,
             queue: self.queue.clone(),
@@ -230,13 +239,13 @@ pub struct Kernel {
 
 impl Kernel {
     pub fn arg_tensor<T>(mut self, val: T) -> Self
-    where
-        T: AsRef<Tensor>,
+        where
+            T: AsRef<Tensor>,
     {
         let data = val.as_ref().data();
 
         match data.deref() {
-            Data::Device(data) => {
+            Data::OpenCl(data) => {
                 let buffer = data.buffer();
 
                 let mem = &buffer.cl_mem;
@@ -245,39 +254,41 @@ impl Kernel {
                     self.next_arg_idx,
                     ocl::enums::ArgVal::mem(mem),
                 )
-                .unwrap();
+                    .unwrap();
             }
-            Data::Host(_) => panic!("tensor not on the device!"),
+            Data::Host(_) => panic!("tensor not on the backend!"),
+            #[cfg(feature = "cuda")]
+            Data::Cuda(_) => unimplemented!(),
         }
         self.next_arg_idx += 1;
         self
     }
 
     pub fn arg<T>(mut self, val: T) -> Self
-    where
-        T: ocl::OclPrm,
+        where
+            T: ocl::OclPrm,
     {
         ocl::core::set_kernel_arg(
             &self.cl_kernel,
             self.next_arg_idx,
             ocl::enums::ArgVal::scalar(&val),
         )
-        .unwrap();
+            .unwrap();
         self.next_arg_idx += 1;
         self
     }
 
     pub fn global_work_size<E>(mut self, dims: E) -> Self
-    where
-        E: Into<ocl::SpatialDims>,
+        where
+            E: Into<ocl::SpatialDims>,
     {
         self.gws = Some(dims.into());
         self
     }
 
     pub fn local_work_size<E>(mut self, dims: E) -> Self
-    where
-        E: Into<ocl::SpatialDims>,
+        where
+            E: Into<ocl::SpatialDims>,
     {
         self.lws = Some(dims.into());
         self
@@ -302,7 +313,7 @@ impl Kernel {
                 None::<ocl::core::Event>,
                 None::<&mut ocl::core::Event>,
             )
-            .map_err(|e| DeviceError::from_core(e))
+                .map_err(|e| DeviceError::from_core(e))
         }
     }
 }
@@ -340,7 +351,7 @@ impl Kernel {
 //             //     DeviceBuffer::Half(buf) => unimplemented!(),
 //             // };
 //         } else {
-//             panic!("tensor not on the device!!!")
+//             panic!("tensor not on the backend!!!")
 //         }
 //         self
 //     }

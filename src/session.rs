@@ -14,6 +14,7 @@ pub mod context;
 pub mod device;
 pub mod memory;
 pub mod profiler;
+pub mod reactor;
 
 #[derive(Debug)]
 pub struct Program<'a> {
@@ -56,11 +57,12 @@ enum StackElement<'a> {
     Operation(OwnedRef<'a, Operator>, Vec<StackElement<'a>>),
 }
 
+
 impl<'a> Program<'a> {
     pub fn compile<I1, I2>(x: I1, y: I2) -> Self
-    where
-        I1: IntoIterator<Item = &'a Var>,
-        I2: IntoIterator<Item = &'a Var>,
+        where
+            I1: IntoIterator<Item=&'a Var>,
+            I2: IntoIterator<Item=&'a Var>,
     {
         let x = x.into_iter().collect_vec();
         let y = y
@@ -177,6 +179,8 @@ impl<'a> Program<'a> {
         let mut routines = Vec::new();
         //let mut routines_notfused = Vec::new();
 
+
+        // this loop can be done in parallel.
         for (node, inputs) in states {
             program_inputs.extend(inputs.iter());
 
@@ -217,8 +221,6 @@ impl<'a> Program<'a> {
 
         let mut ctx_temp = HashMap::<Var, Tensor>::new();
         let mut data_stack = Vec::new();
-
-        let mut how_many_in_stack = HashMap::<&Var, usize>::new();
 
         while !stack.is_empty() {
             let v = stack.last().unwrap();
@@ -263,6 +265,9 @@ impl<'a> Program<'a> {
                                 let MemoryError::OutOfMemory { mem_needed, mem_total } = me else {
                                     panic!("{:?}", me);
                                 };
+
+                                // await all tensors in ctx_temp
+                                // tensor.synchronize().await
 
                                 ////////////
                                 let mem_start = ctx.memory.mem_used();
@@ -504,10 +509,11 @@ impl<'a> Program<'a> {
     // }
 }
 
+// All operations are executed in the same stream.
 impl<'a> Routine<'a> {
     pub fn compile<I>(x: I, y: &'a Var, op_fusion: bool) -> Self
-    where
-        I: IntoIterator<Item = &'a Var>,
+        where
+            I: IntoIterator<Item=&'a Var>,
     {
         let x = x.into_iter().collect_vec();
 

@@ -32,23 +32,23 @@ Visit [sage.rs](https://sage.rs/) for examples and documentation (work in progre
 
 ```rust
 // Context specifies the processor (e.g., GPU) that executes the program.
-let mut ctx = Context::with_device(0);
+let mut ctx = Context::with_device(2);
 
 // Tensors are n-dimension array
 let x_data = Tensor::new([
-[0.5173, - 0.9896, - 0.7773],
-[0.1546, - 0.7499, 0.2420],
-[ - 1.6632, 1.0712, - 0.2654],
-]).to_device( & mut ctx);
+    [0.5173, -0.9896, -0.7773],
+    [0.1546, -0.7499, 0.2420],
+    [-1.6632, 1.0712, -0.2654],
+]).to_device(&mut ctx);
 
 // Variables hold (un)evaluated tensors.
-let x = Var::new(a_data);
+let x = Var::new(x_data);
 
 let y = Var::new(Tensor::new([
-[0.5173, - 0.9896, - 0.7773],
-[0.1546, - 0.7499, 0.2420],
-[ - 1.6632, 1.0712, - 0.2654],
-]).to_device( & mut ctx));
+    [0.5173, -0.9896, -0.7773],
+    [0.1546, -0.7499, 0.2420],
+    [-1.6632, 1.0712, -0.2654],
+]).to_device(&mut ctx));
 ```
 
 #### Lazy evaluation
@@ -56,23 +56,23 @@ let y = Var::new(Tensor::new([
 ```rust
 // New variable is created as a result of operation
 // There are no actual computations at this moment
-let z = & x * & y + (x * 3.14);
+let z = &x * &y + (&x * 3.14);
 
 // Tensor is evaluated when eval() is called
-let z_data = z.eval( & mut ctx);
-println!("{:?}", c_data);
+let z_data = z.eval(&mut ctx);
+println!("{:?}", z_data);
 
 // Because c already contains evaluated tensor,
 // this only computes addition of the two tensors
-let u_data = ( & z + & x).eval( & mut ctx);
-println!("{:?}", d_data);
+let u_data = (&z + &x).eval(&mut ctx);
+println!("{:?}", u_data);
 ```
 
 #### Basic operators
 
 ```rust
 // Arithmetic operators
-let y = ( & x * & x - & x) / & x;
+let y = (&x * &x - &x) / &x;
 
 // Math functions
 x.abs(); x.log(); x.exp(); x.sqrt(); x.erf(); ...
@@ -84,10 +84,10 @@ x.sin(); x.sinh(); x.asin(); x.asinh(); ...
 x.round(); x.ceil(); x.floor(); ...
 
 // Logical operators
-and( & x, & y); or( & x, & y); gt( & x, & y); le( & x, & y); ...
+and(&x, &y); or(&x, &y); gt(&x, &y); le(&x, &y); ...
 
 // Conditional operator (ternary operator)
-cond(gt( & x, 0.0), & x, & y);
+cond(gt(&x, 0.0), &x, &y);
 
 // Datatype casting
 x.int(); x.float(); ...
@@ -105,7 +105,7 @@ assert_eq!(x.rank(), 2);
 
 // For binary operations, tensor shapes are broadcasted
 // (c.f., https://numpy.org/doc/stable/user/basics.broadcasting.html)
-let y = & x + Tensor::new([[1.0], [2.0], [3.0]]);
+let y = &x + Tensor::new([[1.0], [2.0], [3.0]]);
 
 // Shape manipulations
 x.transpose(0, 1);
@@ -122,11 +122,11 @@ x.reshape([1, 9]);
 x.slice(0, 0, 2);
 
 // Concatenation
-concat([ & x, & y, & z]);
+concat([&x, &y, &z]);
 
 // Gather and scatter
 let t = Tensor::new([
-[[1, 1, 1], [1, 1, 1], [1, 1, 1]],
+    [[1, 1, 1], [1, 1, 1], [1, 1, 1]],
 ]);
 let y = x.gather(t, 0);
 let x = y.scatter(t, [3, 3]);
@@ -165,10 +165,10 @@ fn softmax_cross_entropy(x1: Var, x2: Var) -> Var
 
 ```rust
 // Matrix multiplication
-x.matmul( & y);
+x.matmul(&y);
 
 // Batched matrix multiplication
-x.batch_matmul( & y);
+x.batch_matmul(&y);
 ```
 
 ### Automatic differentiation
@@ -177,16 +177,26 @@ All operations defined for `Variable` is differentiable. The gradient of a varia
 function.
 
 ```rust
-let grads = grad( & y, & x);
+let x_data = Tensor::new([
+    [0.5173, -0.9896, -0.7773],
+    [0.1546, -0.7499, 0.2420],
+    [-1.6632, 1.0712, -0.2654],
+]).to_device(&mut ctx);
+
+// Variables hold (un)evaluated tensors.
+let x = Var::new(x_data);
+let y = (&x + 3.0) * (&x + 5.5);
+
+let gy = grad(&y, [&x]);
 
 // Get gradient of x
-let x_grad = grads.get( & x);
+let gygx = gy.get(&x).unwrap();
 
 // Higher-order differentiation is also possible
-let x_grad_grad = grad( & y, & x_grad).get( & x_grad);
+let ggygx = grad(gygx, [&x]);
+let ggyggx = ggygx.get(&x).unwrap();
 
-let x_grad_grad_data = x_grad_grad.eval( & mut ctx);
-println!("{:?}", x_grad_grad_data);
+println!("{:?}", ggyggx.eval(&mut ctx));
 ```
 
 ### Neural Networks
@@ -216,7 +226,7 @@ model
 .add(layers::Relu)
 .add(layers::Dense::new(64, 10));
 
-let logits = model.pass( & x);
+let logits = model.pass(&x);
 ```
 
 #### Training a model
@@ -224,11 +234,15 @@ let logits = model.pass( & x);
 Several momentum-based optimizers (e.g., [Adam](https://arxiv.org/abs/1412.6980)) are available.
 
 ```rust
+println!("{:?}", Device::get_list());
+
 let mut ctx = Context::new();
 
-let batch_size = 10;
+let mut model = ResNet::new(ResNetConfig::d18(1, 10));
+
+let batch_size = 128;
 let num_epoch = 30;
-let learning_rate = 1e-5;
+let learning_rate = 1e-4;
 
 let dataset = Mnist::from_source(
     "./dataset/mnist/train-images.idx3-ubyte",
@@ -237,34 +251,37 @@ let dataset = Mnist::from_source(
 
 let mut optimizer = Adam::new(learning_rate);
 
-model.init( & mut ctx);
-optimizer.init( & mut ctx);
+model.init(&mut ctx, 0);
+optimizer.init(&mut ctx);
 
 let input = Var::empty([batch_size, 28, 28, 1], DataType::Float);
 let label = Var::empty([batch_size, 1], DataType::Uint);
-let logits = model.pass( & input);
 
-let loss = softmax_cross_entropy( & logits, & label).mean(0, false);
-let grads = grad_param( & loss, & model);
+let logits = model.pass(&input);
 
-let p = Program::compile( & [], grads.values());
+let loss = softmax_cross_entropy(&logits, &label).mean(0, false);
+let grads = grad_param(&loss, &model);
+let acc = accuracy(&logits, &label);
+
+let p = Program::compile(&[], grads.values().chain([&loss, &acc]));
 
 for i in 0..num_epoch {
     for (j, (images, labels)) in dataset.iter().batch(batch_size, Mnist::collate).enumerate() {
-        let (images, labels) = (images.to_device( & mut ctx), labels.to_device( & mut ctx));
+        let (images, labels) = (images.to_device(&mut ctx), labels.to_device(&mut ctx));
         
         input.set(images);
         label.set(labels);
         
-        p.exec( & mut ctx);
-        optimizer.update( & grads, & mut ctx);
+        p.exec(&mut ctx);
         
-        println ! (
+        optimizer.update(&grads, &mut ctx);
+        
+        println!(
             "epoch {:?} / batch {:?} / acc: {:?} / loss: {:?}",
             i,
             j,
-            acc.eval( & mut ctx).to_host().scalar::< f32 > (),
-            loss.eval( & mut ctx).to_host().scalar::< f32 >(),
+            acc.eval(&mut ctx).to_host().scalar::<f32>(),
+            loss.eval(&mut ctx).to_host().scalar::<f32>(),
         );
         
         ctx.data.clear();
@@ -281,4 +298,4 @@ more details.
 
 ## License
 
-Sage is licensed under [MIT License](LICENSE).
+Sage is licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT License](LICENSE-MIT) at your option.

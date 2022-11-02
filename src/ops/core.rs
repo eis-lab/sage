@@ -579,7 +579,7 @@ impl NaryOperator<1> for Unslice {
         let stride_ref = Shape::default_strides(x.extents());
 
         let data_type = x.data_type().opencl();
-
+        // computer.submit(ctx.backend.unslice())
         let (idx_c, is_direct) = translate_id(
             "gid",
             &stride_ref,

@@ -1,7 +1,6 @@
 use crate::error::Error;
 use crate::session::device::{Buffer, Device};
-use crate::tensor::data::DeviceData;
-use crate::{Context, DataType, Tensor};
+use crate::tensor::data::OpenClData;
 use itertools::Itertools;
 use ocl::enums::DeviceSpecifier::All;
 use std::cell::{Cell, RefCell};
@@ -95,7 +94,7 @@ pub struct AllocatorOld {
 //         }
 //     }
 //
-//     pub fn alloc(&mut self, size: usize, device: &Device) -> Result<Memory, Error> {
+//     pub fn alloc(&mut self, size: usize, backend: &Device) -> Result<Memory, Error> {
 //         let pool = if size <= SMALL_SIZE {
 //             &self.small
 //         } else {
@@ -103,7 +102,7 @@ pub struct AllocatorOld {
 //         };
 //
 //         let mem_curr = self.mem_used();
-//         let block = { RefCell::borrow_mut(pool).deref_mut().alloc(size, device)? };
+//         let block = { RefCell::borrow_mut(pool).deref_mut().alloc(size, backend)? };
 //
 //         if let Some(mem_cap) = self.mem_cap {
 //             let mem_now = self.mem_used();
@@ -198,10 +197,10 @@ impl Allocator {
         RefCell::borrow(&self.pool).mem_used
     }
 
-    pub fn alloc(&self, size: usize, device: &Device) -> Result<Memory, Error> {
+    pub fn alloc(&self, size: usize, device: &Device) -> Result<OpenClMemory, Error> {
         let block = RefCell::borrow_mut(&self.pool).alloc(size, device)?;
         let buffer = block.buffer();
-        Ok(Memory {
+        Ok(OpenClMemory {
             pool: Rc::downgrade(&self.pool),
             block,
             buffer,
@@ -612,7 +611,7 @@ impl PoolOld {
         // if let Some(block) = free_block {
         //     Some(block)
         // } else {
-        //     self.expand(size, device);
+        //     self.expand(size, backend);
         //     self.get_free_block(size)
         // }
     }
@@ -671,19 +670,19 @@ impl PoolOld {
 }
 
 #[derive(Clone)]
-pub struct Memory {
+pub struct OpenClMemory {
     pool: Weak<RefCell<Pool>>,
     block: Block,
     buffer: Buffer,
 }
 
-impl Memory {
+impl OpenClMemory {
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
     }
 }
 
-impl Drop for Memory {
+impl Drop for OpenClMemory {
     fn drop(&mut self) {
         if let Some(pool) = self.pool.upgrade() {
             let mut pool = RefCell::borrow_mut(&pool);

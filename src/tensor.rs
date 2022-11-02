@@ -11,8 +11,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::tensor::data::{DataLiteral, DataType, DeviceData, HostData, Scalar};
+use crate::tensor::data::{DataLiteral, DataType, OpenClData, HostData, Scalar};
 use crate::tensor::iter::{AlongAxisIter, Iter};
+use crate::backend;
 
 pub mod data;
 pub mod format;
@@ -41,8 +42,8 @@ pub struct TensorDesc {
 
 impl TensorDesc {
     pub fn new<E>(extents: E, data_type: DataType) -> Self
-    where
-        E: Extent,
+        where
+            E: Extent,
     {
         TensorDesc {
             shape: Shape::new(extents),
@@ -67,8 +68,8 @@ impl TensorDesc {
     }
 
     pub fn extent<A>(&self, axis: A) -> usize
-    where
-        A: Axis,
+        where
+            A: Axis,
     {
         let axis = axis.to_usize(self.rank()).unwrap();
         self.shape.extents[axis]
@@ -112,9 +113,9 @@ impl Tensor {
     // ******************************** Constructors ******************************** //
 
     pub fn new<D, T>(data: D) -> Self
-    where
-        D: DataLiteral<T>,
-        T: Scalar,
+        where
+            D: DataLiteral<T>,
+            T: Scalar,
     {
         Tensor {
             desc: TensorDesc::new(data.extents(), T::data_type()),
@@ -123,10 +124,10 @@ impl Tensor {
     }
 
     pub fn from_iter<S, I, T>(extents: S, iter: I) -> Self
-    where
-        S: Extent,
-        I: Iterator<Item = T>,
-        T: Scalar,
+        where
+            S: Extent,
+            I: Iterator<Item=T>,
+            T: Scalar,
     {
         //let shape = shape.to_arr(0).unwrap();
         let data = T::vec_to_data(iter.collect());
@@ -138,9 +139,9 @@ impl Tensor {
     }
 
     pub fn from_vec<S, T>(extents: S, vec: Vec<T>) -> Self
-    where
-        S: Extent,
-        T: Scalar,
+        where
+            S: Extent,
+            T: Scalar,
     {
         //let shape = shape.to_arr(0).unwrap();
         let data = T::vec_to_data(vec);
@@ -152,9 +153,9 @@ impl Tensor {
     }
 
     pub fn from_scalar<E, T>(extents: E, val: T) -> Self
-    where
-        E: Extent,
-        T: Scalar,
+        where
+            E: Extent,
+            T: Scalar,
     {
         let shape = Shape::new(extents);
         let data = T::vec_to_data(vec![val; shape.size()]);
@@ -169,10 +170,10 @@ impl Tensor {
     }
 
     pub fn from_dist<E, D, T>(extents: E, dist: D) -> Self
-    where
-        E: Extent,
-        D: Distribution<T> + Sync,
-        T: Scalar,
+        where
+            E: Extent,
+            D: Distribution<T> + Sync,
+            T: Scalar,
     {
         let extents = extents.to_arr(0).unwrap();
 
@@ -192,15 +193,15 @@ impl Tensor {
     // ******************************** Constructor Helpers ******************************** //
 
     pub fn uninit<S>(shape: S, data_type: DataType, ctx: &mut Context) -> Result<Self, Error>
-    where
-        S: Extent,
+        where
+            S: Extent,
     {
         let shape = Shape::new(shape);
-        let data = DeviceData::new(shape.size(), data_type, ctx)?;
+        let data = OpenClData::new(shape.size(), data_type, ctx)?;
 
         Ok(Tensor {
             desc: TensorDesc { shape, data_type },
-            data: Arc::new(RefCell::new(Data::Device(data))),
+            data: Arc::new(RefCell::new(Data::OpenCl(data))),
         })
     }
 
@@ -211,32 +212,34 @@ impl Tensor {
     pub fn fill_zero(&self) {
         match self.data().deref() {
             Data::Host(data) => {
-                panic!("only fill on device tensors")
+                panic!("only fill on backend tensors")
             }
-            Data::Device(data) => {
+            Data::OpenCl(data) => {
                 data.buffer().fill(0);
             }
+            #[cfg(feature = "cuda")]
+            Data::Cuda(_) => unimplemented!(),
         };
     }
 
     pub fn zeros<S>(shape: S) -> Self
-    where
-        S: Extent,
+        where
+            S: Extent,
     {
         Tensor::from_scalar(shape, 0.0)
     }
 
     pub fn ones<S>(shape: S) -> Self
-    where
-        S: Extent,
+        where
+            S: Extent,
     {
         Tensor::from_scalar(shape, 1.0)
     }
 
     // sample from standard normal dist
     pub fn randn<S>(shape: S) -> Self
-    where
-        S: Extent,
+        where
+            S: Extent,
     {
         Tensor::from_dist(shape, Normal::new(0.0, 1.0).unwrap())
     }
@@ -255,21 +258,21 @@ impl Tensor {
     pub fn device(&self, ctx: &mut Context) {
         let mut data = self.data_mut();
         if let Data::Host(d) = data.deref_mut() {
-            *data = Data::Device(DeviceData::from_host(d, ctx));
+            *data = Data::OpenCl(OpenClData::from_host(d, ctx));
         }
     }
 
     pub fn host(&self) {
         let mut data = self.data_mut();
-        if let Data::Device(d) = data.deref_mut() {
+        if let Data::OpenCl(d) = data.deref_mut() {
             *data = Data::Host(HostData::from_device(d));
         }
     }
 
     pub fn set_data<D, T>(&self, data: D)
-    where
-        D: DataLiteral<T>,
-        T: Scalar,
+        where
+            D: DataLiteral<T>,
+            T: Scalar,
     {
         *self.data_mut().deref_mut() = Data::Host(data.to_buf());
     }
@@ -277,20 +280,22 @@ impl Tensor {
     pub fn to_device(&self, ctx: &mut Context) -> Tensor {
         match self.data().deref() {
             Data::Host(data) => {
-                let data = DeviceData::from_host(data, ctx);
+                let data = OpenClData::from_host(data, ctx);
                 Tensor {
                     desc: self.desc.clone(),
-                    data: Arc::new(RefCell::new(Data::Device(data))),
+                    data: Arc::new(RefCell::new(Data::OpenCl(data))),
                 }
             }
-            Data::Device(_) => self.clone(),
+            Data::OpenCl(_) => self.clone(),
+            #[cfg(feature = "cuda")]
+            Data::Cuda(_) => unimplemented!(),
         }
     }
 
     pub fn to_host(&self) -> Tensor {
         match self.data().deref() {
             Data::Host(_) => self.clone(),
-            Data::Device(data) => {
+            Data::OpenCl(data) => {
                 let data = HostData::from_device(data);
 
                 Tensor {
@@ -298,12 +303,14 @@ impl Tensor {
                     data: Arc::new(RefCell::new(Data::Host(data))),
                 }
             }
+            #[cfg(feature = "cuda")]
+            Data::Cuda(_) => unimplemented!(),
         }
     }
 
     pub fn scalar<T>(&self) -> T
-    where
-        T: Scalar,
+        where
+            T: Scalar,
     {
         let buffer = self.buffer::<T>().unwrap();
         buffer.borrow()[0]
@@ -315,22 +322,22 @@ impl Tensor {
 
         (t1.size() == t2.size())
             && t1
-                .iter::<f32>()
-                .zip(t2.iter::<f32>())
-                .all(|((_, v1), (_, v2))| (v1 - v2).abs() < eps)
+            .iter::<f32>()
+            .zip(t2.iter::<f32>())
+            .all(|((_, v1), (_, v2))| (v1 - v2).abs() < eps)
     }
 
     pub fn all_equal<S>(t1: &Tensor, t2: &Tensor) -> bool
-    where
-        S: Scalar + Eq,
+        where
+            S: Scalar + Eq,
     {
         let (t1, t2) = (t1.to_host(), t2.to_host());
 
         (t1.size() == t2.size())
             && t1
-                .iter::<S>()
-                .zip(t2.iter::<S>())
-                .all(|((_, v1), (_, v2))| v1 == v2)
+            .iter::<S>()
+            .zip(t2.iter::<S>())
+            .all(|((_, v1), (_, v2))| v1 == v2)
     }
 
     // ******************************** Getters ******************************** //
@@ -348,8 +355,8 @@ impl Tensor {
     }
 
     pub fn buffer<T>(&self) -> Option<Ref<[T]>>
-    where
-        T: Scalar,
+        where
+            T: Scalar,
     {
         let data = self.data();
 
@@ -375,8 +382,8 @@ impl Tensor {
     }
 
     pub fn extent<A>(&self, axis: A) -> usize
-    where
-        A: Axis,
+        where
+            A: Axis,
     {
         self.desc.extent(axis)
     }
@@ -405,8 +412,8 @@ impl Tensor {
     // ******************************** Converters ******************************** //
 
     pub fn to_vec<T>(&self) -> Vec<T>
-    where
-        T: Scalar,
+        where
+            T: Scalar,
     {
         self.iter::<T>().map(|(_, v)| v).collect()
     }
@@ -414,16 +421,16 @@ impl Tensor {
     // ******************************** Iterators ******************************** //
 
     pub fn iter<T>(&self) -> Iter<T>
-    where
-        T: Scalar,
+        where
+            T: Scalar,
     {
         Iter::new(self)
     }
 
     pub fn along_axis<A, T>(&self, axis: A) -> AlongAxisIter
-    where
-        A: Axis,
-        T: Scalar,
+        where
+            A: Axis,
+            T: Scalar,
     {
         let axis = axis.to_usize(self.rank()).unwrap();
         AlongAxisIter::new(self, axis)
@@ -442,8 +449,8 @@ impl Tensor {
     }
 
     pub fn squeeze_axis<A>(&self, axis: A) -> Tensor
-    where
-        A: Axis,
+        where
+            A: Axis,
     {
         let axis = axis.to_usize(self.rank()).unwrap();
 
@@ -455,8 +462,8 @@ impl Tensor {
     }
 
     pub fn expand_axis<A>(&self, axis: A) -> Tensor
-    where
-        A: Axis,
+        where
+            A: Axis,
     {
         // allow non-existing index
         let axis = axis.to_usize(self.rank() + 1).unwrap();
@@ -466,8 +473,8 @@ impl Tensor {
 
     // reshape (underlying data does not change)
     pub fn view<S>(&self, shape: S) -> Tensor
-    where
-        S: Extent,
+        where
+            S: Extent,
     {
         let layout = Shape::new(shape);
 
@@ -482,9 +489,9 @@ impl Tensor {
 
     // swap last two dims of tensor
     pub fn transpose<A1, A2>(&self, axis1: A1, axis2: A2) -> Tensor
-    where
-        A1: Axis,
-        A2: Axis,
+        where
+            A1: Axis,
+            A2: Axis,
     {
         let axis1 = axis1.to_usize(self.rank()).unwrap();
         let axis2 = axis2.to_usize(self.rank()).unwrap();
@@ -497,8 +504,8 @@ impl Tensor {
     }
 
     pub fn permute<As>(&self, axes: As) -> Tensor
-    where
-        As: Axes,
+        where
+            As: Axes,
     {
         let axes = axes.to_arr(self.rank()).unwrap();
 
@@ -516,8 +523,8 @@ impl Tensor {
     }
 
     pub fn expand<S>(&self, extent: S) -> Tensor
-    where
-        S: Extent,
+        where
+            S: Extent,
     {
         let shape = extent.to_arr(0).unwrap();
 
@@ -527,8 +534,8 @@ impl Tensor {
     // ******************************** Indexing operations ******************************** //
 
     pub fn index<A>(&self, index: usize, axis: A) -> Tensor
-    where
-        A: Axis,
+        where
+            A: Axis,
     {
         let axis = axis.to_usize(self.rank()).unwrap();
         let axis_size = self.extents()[axis];
@@ -541,8 +548,8 @@ impl Tensor {
     }
 
     pub fn slice<A>(&self, start: usize, end: usize, axis: A) -> Tensor
-    where
-        A: Axis,
+        where
+            A: Axis,
     {
         let axis = axis.to_usize(self.rank()).unwrap();
         let axis_size = self.extents()[axis];
@@ -561,7 +568,9 @@ impl Tensor {
 
 pub enum Data {
     Host(HostData),
-    Device(DeviceData),
+    OpenCl(OpenClData),
+    #[cfg(feature = "cuda")]
+    Cuda(backend::cuda::Buffer),
 }
 
 impl AsRef<Tensor> for Tensor {

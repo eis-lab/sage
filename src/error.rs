@@ -6,7 +6,7 @@ use crate::shape::ShapeError;
 pub enum Error {
     #[error("memory error")]
     Memory(MemoryError),
-    #[error("device error")]
+    #[error("backend error")]
     Device(DeviceError),
     #[error("shape error")]
     Shape(ShapeError),

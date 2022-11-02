@@ -501,8 +501,9 @@ impl NaryOperator<1> for Col2im<2> {
 #[cfg(test)]
 mod tests {
     use crate::ops::conv::{col2im, conv_2d, im2col};
-    use crate::var::grad_check;
-    use crate::{Context, Tensor, Var};
+    use crate::session::context::Context;
+    use crate::tensor::Tensor;
+    use crate::var::{grad_check, Var};
 
     #[test]
     fn test_im2col() {

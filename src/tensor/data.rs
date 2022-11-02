@@ -2,7 +2,7 @@ use crate::error::Error;
 use crate::session::context::Context;
 use crate::session::device::Buffer;
 use crate::session::memory;
-use crate::session::memory::{Memory, MemoryError};
+use crate::session::memory::{OpenClMemory, MemoryError};
 use std::cell::RefCell;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
@@ -48,13 +48,13 @@ pub enum HostData {
     Half(Vec<f32>),
 }
 
-pub struct DeviceData {
-    pub memory: Memory,
+pub struct OpenClData {
+    pub memory: OpenClMemory,
     pub data_type: DataType,
 }
 
 impl HostData {
-    pub fn from_device(data: &DeviceData) -> Self {
+    pub fn from_device(data: &OpenClData) -> Self {
         let buffer = data.buffer();
 
         match data.data_type {
@@ -102,7 +102,7 @@ impl HostData {
     }
 }
 
-impl DeviceData {
+impl OpenClData {
     pub fn new(size: usize, data_type: DataType, ctx: &mut Context) -> Result<Self, Error> {
         ctx.alloc(data_type, size)
     }
